@@ -30,7 +30,7 @@ class OracleDB:
 # -----------------------------
 # 메인 GUI
 # -----------------------------
-class BookManagerApp:
+class ClientManagerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("회원 관리 프로그램")
@@ -89,5 +89,5 @@ class BookManagerApp:
 # -----------------------------
 if __name__ == "__main__":
     root = tk.Tk()
-    app = BookManagerApp(root)
+    app = ClientManagerApp(root)
     root.mainloop()
