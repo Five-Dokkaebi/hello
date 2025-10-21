@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.font import Font
 
-# book_registration.py에 정의된 클래스를 import (파일이 존재한다고 가정)
+# book_registration.py에 정의된 클래스를 import 
 from book_registration import BookRegistrationWindow
 import oracledb
 
@@ -30,7 +30,7 @@ class OracleDB:
         """데이터베이스에서 모든 도서 정보를 가져옵니다."""
         conn = self.connect()
         cur = conn.cursor()
-        sql = "SELECT Tracking_num, Title, Author, Publisher, ISBN FROM Books_Info ORDER BY Title"
+        sql = "SELECT Tracking_num, Title, Author, Publisher, Isbn FROM Book_Info ORDER BY Title"
         cur.execute(sql)
         rows = cur.fetchall()
         cur.close()
@@ -42,8 +42,8 @@ class OracleDB:
         cur = conn.cursor()
         search_term = f'%{keyword}%'
         sql = """
-            SELECT Tracking_num, Title, Author, Publisher, ISBN
-            FROM Books_Info 
+            SELECT Tracking_num, Title, Author, Publisher, Isbn
+            FROM Book_Info 
             WHERE Title LIKE :1 OR Author LIKE :2
             ORDER BY Title
         """
@@ -56,10 +56,10 @@ class OracleDB:
         """새로운 도서 정보를 데이터베이스에 추가합니다."""
         conn = self.connect()
         cur = conn.cursor()
-        # Tracking_num은 시퀀스(예: BOOKS_INFO_SEQ.NEXTVAL)로, Db_date는 SYSDATE로 처리한다고 가정합니다.
-        sql = """
-            INSERT INTO Books_Info (Tracking_num, ISBN, Title, Author, Publisher, Price, Link, Image_path, Info, Db_date)
-            VALUES (BOOKS_INFO_SEQ.NEXTVAL, :1, :2, :3, :4, :5, :6, :7, :8, SYSDATE)
+        # Db_date는 SYSDATE로 처리한다고 가정합니다.
+        sql = """ 
+            INSERT INTO Book_Info (Isbn, Title, Author, Publisher, Price, Link, Image_path, Info, Db_date)
+            VALUES (:1, :2, :3, :4, :5, :6, :7, :8, SYSDATE)
         """
         cur.execute(sql, data)
         conn.commit()
