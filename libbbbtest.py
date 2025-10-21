@@ -1,17 +1,21 @@
 import sys
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout, QGroupBox, QLabel,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTextEdit,
-    QFormLayout, QSplitter, QHeaderView, QSizePolicy
+    QFormLayout, QSplitter, QHeaderView, QSizePolicy, QGridLayout
 )
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QFont, QColor, QPalette
+from PySide6.QtCore import Qt, QSize, QRectF
+from PySide6.QtGui import QFont, QColor, QPalette, QPainter, QPainterPath, QPen
 
 class BookLoanApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('도서 정보와 대출 정보') # 타이틀 설정
         self.setGeometry(100, 100, 1000, 600)
+
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.old_pos = None
         
         self.initUI()
         self.applyStyles()
@@ -21,8 +25,7 @@ class BookLoanApp(QWidget):
         main_layout = QVBoxLayout(self) # 전체 창의 레이아웃 (타이틀 바 역할 포함)
         
         # --- 상단 타이틀 바 역할 (커스텀 닫기 버튼 포함) ---
-        title_bar_widget = QWidget()
-        title_bar_layout = QHBoxLayout(title_bar_widget)
+        title_bar_layout = QHBoxLayout()
         title_bar_layout.setContentsMargins(0, 0, 0, 0)
         
         title_label = QLabel("도서 정보와 대출 정보")
@@ -31,9 +34,9 @@ class BookLoanApp(QWidget):
         title_label.setStyleSheet("color: black;") 
         
         # 빨간색 원형 닫기 버튼 (시뮬레이션)
-        close_button = QPushButton("X")
-        close_button.setFixedSize(80, 30) # 원형을 위해 가로세로 동일하게
-        close_button.setStyleSheet("""
+        self.close_button = QPushButton("X")
+        self.close_button.setFixedSize(80, 30) # 원형을 위해 가로세로 동일하게
+        self.close_button.setStyleSheet("""
             QPushButton {
                 background-color: red;
                 color: white; /* 이미지처럼 X는 흰색 유지 */
@@ -45,14 +48,14 @@ class BookLoanApp(QWidget):
                 background-color: #ff3333;
             }
         """)
-        close_button.clicked.connect(self.close) # 실제 창 닫기 기능 연결
+        self.close_button.clicked.connect(self.close) # 실제 창 닫기 
 
         title_bar_layout.addWidget(title_label)
         title_bar_layout.addStretch() # 타이틀을 왼쪽으로, 버튼을 오른쪽으로
-        title_bar_layout.addWidget(close_button)
+        title_bar_layout.addWidget(self.close_button)
         
         # 전체 레이아웃에 커스텀 타이틀 바 추가
-        main_layout.addWidget(title_bar_widget)
+        main_layout.addLayout(title_bar_layout)
 
         # 메인 스플리터 (도서정보와 대출정보)
         content_splitter = QSplitter(Qt.Horizontal)
@@ -67,6 +70,8 @@ class BookLoanApp(QWidget):
         # 1-1. 도서정보 (상단 50%)
         top_book_widget = QWidget()
         top_book_layout = QHBoxLayout(top_book_widget)
+        top_book_layout.setSpacing(10) # 책 표지와 정보 간의 간격
+        
         
         # 책 표지 이미지 (임시 라벨)
         image_label = QLabel("책 표지 이미지")
@@ -75,45 +80,60 @@ class BookLoanApp(QWidget):
         image_label.setStyleSheet("border: 1px solid black; background-color: #f0f0f0; color: black;")
         image_label.setFont(QFont("Arial", 10))
 
-        # 제목, 저자, 출판사 (Form 레이아웃)
+       
+        # 제목, 저자, 출판사 (Grid 레이아웃으로 변경)
         details_widget = QWidget()
-        details_layout = QFormLayout(details_widget)
-        details_layout.setContentsMargins(10, 0, 0, 0) # 왼쪽 패딩
+        details_layout = QGridLayout(details_widget)
+        details_layout.setVerticalSpacing(30) # 행 간의 수직 간격 설정
         
-        # QLabel에 텍스트와 폰트 설정
+        # 라벨 및 값 생성
+        title_text_label = QLabel("제목:")
         title_val = QLabel("사랑학개론")
+        author_text_label = QLabel("저자:")
         author_val = QLabel("김승호")
+        publisher_text_label = QLabel("출판사:")
         publisher_val = QLabel("AGAPE")
 
-        # 폰트 굵게, 크기 조정, 색상 검정
-        font_bold = QFont("Arial", 10, QFont.Bold)
-        title_val.setFont(font_bold)
-        title_val.setStyleSheet("color: black;")
-        author_val.setFont(font_bold)
-        author_val.setStyleSheet("color: black;")
-        publisher_val.setFont(font_bold)
-        publisher_val.setStyleSheet("color: black;")
-
-        details_layout.addRow(QLabel("제목:"), title_val)
-        details_layout.addRow(QLabel("저자:"), author_val)
-        details_layout.addRow(QLabel("출판사:"), publisher_val)
+        # 폰트 설정
+        label_font = QFont("Arial", 13)
+        value_font = QFont("Arial", 13, QFont.Bold)
         
-        # 폼 레이아웃의 라벨들도 폰트 및 색상 조정
-        for i in range(details_layout.rowCount()):
-            label_widget = details_layout.itemAt(i, QFormLayout.LabelRole).widget()
-            if isinstance(label_widget, QLabel):
-                label_widget.setFont(QFont("Arial", 10))
-                label_widget.setStyleSheet("color: black;")
+        title_text_label.setFont(label_font)
+        author_text_label.setFont(label_font)
+        publisher_text_label.setFont(label_font)
+        
+        title_val.setFont(value_font)
+        author_val.setFont(value_font)
+        publisher_val.setFont(value_font)
+        
+        # 스타일시트 설정
+        style = "color: black;"
+        title_text_label.setStyleSheet(style)
+        title_val.setStyleSheet(style)
+        author_text_label.setStyleSheet(style)
+        author_val.setStyleSheet(style)
+        publisher_text_label.setStyleSheet(style)
+        publisher_val.setStyleSheet(style)
+
+        # 그리드에 위젯 추가
+        details_layout.addWidget(title_text_label, 0, 0)
+        details_layout.addWidget(title_val, 0, 1)
+        details_layout.addWidget(author_text_label, 1, 0)
+        details_layout.addWidget(author_val, 1, 1)
+        details_layout.addWidget(publisher_text_label, 2, 0)
+        details_layout.addWidget(publisher_val, 2, 1)
+        details_layout.setColumnStretch(1, 1) # 값 열이 남은 공간을 차지하도록
 
         top_book_layout.addWidget(image_label)
-        top_book_layout.addWidget(details_widget) # 위젯으로 감싸서 추가
+        top_book_layout.addWidget(details_widget, alignment=Qt.AlignTop) # 위젯을 위쪽으로 정렬
+
 
         # 1-2. 도서정보 (하단 50%)
         bottom_book_widget = QWidget()
         bottom_book_layout = QVBoxLayout(bottom_book_widget)
         
         book_desc_label = QLabel("책 설명")
-        book_desc_label.setFont(QFont("Arial", 10, QFont.Bold))
+        book_desc_label.setFont(QFont("Arial", 13, QFont.Bold))
         book_desc_label.setStyleSheet("color: black;")
         bottom_book_layout.addWidget(book_desc_label)
         
@@ -166,6 +186,8 @@ class BookLoanApp(QWidget):
                 background-color: #f0f0f0;
             }
         """)
+
+        
         
         search_layout.addWidget(search_input)
         search_layout.addWidget(search_button)
@@ -250,12 +272,8 @@ class BookLoanApp(QWidget):
         main_layout.addWidget(content_splitter)
 
     def applyStyles(self):
-        # 전체 위젯의 배경색을 하얀색으로 설정
         palette = self.palette()
-        palette.setColor(QPalette.Window, QColor(255, 255, 255)) # 하얀색
-        self.setPalette(palette)
         
-        # 기본 텍스트 색상을 검정으로 설정
         palette.setColor(QPalette.WindowText, QColor(0, 0, 0))
         self.setPalette(palette)
 
@@ -274,10 +292,44 @@ class BookLoanApp(QWidget):
                 color: black; /* 그룹박스 타이틀 검정 */
             }
         """)
+    def paintEvent(self, event):
+        # 둥근 모서리를 가진 배경을 그립니다.
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
 
+        path = QPainterPath()
+         # 테두리 두께(2px)를 고려하여 사각형을 약간 줄입니다.
+        rect = self.rect().adjusted(1, 1, -2, -2)
+        radius = 10  # 모서리의 둥근 정도
+        path.addRoundedRect(QRectF(rect), radius, radius)
+
+        # 흰색 배경 채우기
+        painter.fillPath(path, QColor("white"))
+
+        # 검은색 테두리 그리기
+        pen = QPen(QColor("black"))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawPath(path)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and not self.close_button.geometry().contains(event.pos()):
+            self.old_pos = event.globalPos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.old_pos:
+            delta = event.globalPos() - self.old_pos
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self.old_pos = event.globalPos()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.old_pos = None
+        super().mouseReleaseEvent(event)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ex = BookLoanApp()
     ex.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
