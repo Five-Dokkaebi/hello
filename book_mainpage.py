@@ -4,6 +4,7 @@ from tkinter.font import Font
 
 # book_registration.py에 정의된 클래스를 import 
 from book_registration import BookRegistrationWindow
+from book_loan_management import BookLoanWindow
 import oracledb
 
 # -----------------------------
@@ -41,13 +42,15 @@ class OracleDB:
         conn = self.connect()
         cur = conn.cursor()
         search_term = f'%{keyword}%'
+        # :1, :2 대신 :keyword 라는 '이름'을 가진 바인드 변수를 사용합니다.
         sql = """
             SELECT Tracking_num, Title, Author, Publisher, Isbn
             FROM Book_Info 
-            WHERE Title LIKE :1 OR Author LIKE :2
+            WHERE Title LIKE :keyword OR Author LIKE :keyword
             ORDER BY Title
         """
-        cur.execute(sql, (search_term, search_term))
+        # 이름이 같은 바인드 변수에는 값을 한 번만 전달할 수 있습니다.
+        cur.execute(sql, keyword=search_term)
         rows = cur.fetchall()
         cur.close()
         return rows
@@ -63,7 +66,55 @@ class OracleDB:
         """
         cur.execute(sql, data)
         conn.commit()
-        cur.close()    
+        cur.close()
+#-----------------------------------------------------------------------------------------------------------
+    def fetch_book_by_tracking_num(self, tracking_num):
+        """관리번호(Tracking_num)로 특정 도서 정보를 가져옵니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        # 이미지 경로, 책 설명(Info) 등 상세 정보 포함
+        sql = "SELECT Title, Author, Publisher, Info, Image_path, Isbn FROM Book_Info WHERE Tracking_num = :1"
+        cur.execute(sql, (tracking_num,))
+        row = cur.fetchone()
+        cur.close()
+        return row
+
+    def fetch_users_by_book_loan(self, tracking_num):
+        """특정 도서를 대출 중인 회원 목록을 가져옵니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        # Rent_Management, User_reg 테이블 조인. Return_date가 NULL인 경우만 대출 중으로 간주.
+        sql = """
+            SELECT c.NAME, c.TEL_NUM, TO_CHAR(r.Start_date, 'YYYY-MM-DD'), TO_CHAR(r.Start_date + 14, 'YYYY-MM-DD')
+            FROM Rent_Management r
+            JOIN User_reg c ON r.id_num = c.id_num
+            WHERE r.Tracking_num = :1 AND r.Return_date IS NULL AND c.Del_date IS NULL
+            ORDER BY r.Start_date
+        """
+        cur.execute(sql, (tracking_num,))
+        rows = cur.fetchall()
+        cur.close()
+        return rows   
+
+#----------------------------------------------------------------------------------------------------------- 
+
+    def search_users_for_loan(self, keyword):
+        """키워드로 회원 이름 또는 회원번호를 검색합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        search_term = f'%{keyword}%'
+        # :1 대신 :keyword 라는 '이름'을 가진 바인드 변수를 사용합니다.
+        sql = """
+            SELECT id_num, name
+            FROM User_reg
+            WHERE (name LIKE :keyword OR TO_CHAR(id_num) LIKE :keyword) AND Del_date IS NULL
+            ORDER BY name
+        """
+        # 이름이 같은 바인드 변수에는 값을 한 번만 전달할 수 있습니다.
+        cur.execute(sql, keyword=search_term)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
 
 # -----------------------------
 # 메인 GUI
@@ -126,10 +177,14 @@ class BookManagerApp:
             self.book_tree.heading(col, text=col)
             self.book_tree.column(col, width=width, anchor=tk.CENTER)
 
+        # Treeview에 마우스 클릭 및 움직임 이벤트를 연결합니다.
+        self.book_tree.bind("<Button-1>", self.on_book_tree_click)
+        self.book_tree.bind("<Motion>", self.on_book_tree_motion)
+
         # 프로그램 시작 시 도서 목록을 불러옵니다.
         self.load_book_data()
 
-    def load_book_data(self, keyword=None):
+    def load_book_data(self, keyword=None):#키워드 입력되면 호출됨
         """DB에서 도서 정보를 가져와 테이블에 표시합니다. 키워드가 있으면 필터링합니다."""
         # 기존 테이블의 모든 항목을 삭제합니다.
         for item in self.book_tree.get_children():
@@ -143,14 +198,15 @@ class BookManagerApp:
                 book_list = self.db.fetch_all_books()
 
             for book in book_list:
-                self.book_tree.insert('', tk.END, values=book)
+                values_with_button = list(book) + ["정보"]
+                self.book_tree.insert('', tk.END, values=values_with_button)
         except Exception as e:
             messagebox.showerror("DB 오류", f"도서 목록을 불러오는 데 실패했습니다: {e}")
 
     def search_books(self):
         """검색창의 키워드로 도서 목록을 필터링합니다."""
-        keyword = self.search_entry.get().strip()
-        self.load_book_data(keyword if keyword else None)
+        keyword = self.search_entry.get().strip()#사용자가 검색창에 입력한 텍스트를 가져와 (깨끗하게 한 뒤에) 변수에 넣음
+        self.load_book_data(keyword if keyword else None) #키워드가 입력됬는지 안됬는지
 
     def open_book_registration_window(self):
         """도서등록 창을 엽니다."""
@@ -159,6 +215,33 @@ class BookManagerApp:
         BookRegistrationWindow(register_window, self.db)
         self.root.wait_window(register_window)  # 등록 창이 닫힐 때까지 기다립니다.
         self.load_book_data()  # 창이 닫히면 데이터를 새로고침합니다.
+
+    def on_book_tree_click(self, event):
+        """Treeview 클릭 이벤트를 처리하여 '정보' 버튼 클릭을 감지합니다."""
+        region = self.book_tree.identify("region", event.x, event.y)
+        if region == "cell":
+            column = self.book_tree.identify_column(event.x)
+            # 마지막 컬럼('#6')이 '정보' 컬럼입니다.
+            if column == '#6':
+                item_id = self.book_tree.identify_row(event.y)
+                item_values = self.book_tree.item(item_id, 'values')
+                tracking_num = item_values[0]  # 관리번호는 첫 번째 값 (인덱스 0)
+                self.open_book_detail_window(tracking_num)
+
+    def open_book_detail_window(self, tracking_num):
+        """도서 상세 정보 창을 엽니다."""
+        detail_window = tk.Toplevel(self.root)
+        BookLoanWindow(detail_window, self.db, tracking_num)
+        self.root.wait_window(detail_window)
+        self.load_book_data() # 상세 정보 창이 닫히면 목록을 새로고침합니다.
+
+    def on_book_tree_motion(self, event):
+        """마우스 움직임에 따라 '정보' 컬럼 위에서 커서를 변경합니다."""
+        column = self.book_tree.identify_column(event.x)
+        if column == '#6':
+            self.book_tree.config(cursor="hand2")
+        else:
+            self.book_tree.config(cursor="")
 
 # -----------------------------
 # 실행부
