@@ -4,7 +4,7 @@ from tkinter.font import Font
 
 # book_registration.py에 정의된 클래스를 import 
 from book_registration import BookRegistrationWindow
-from book_loan_management import BookLoanWindow
+from Book_Lookup import BookLookupWindow
 import oracledb
 
 # -----------------------------
@@ -73,11 +73,25 @@ class OracleDB:
         conn = self.connect()
         cur = conn.cursor()
         # 이미지 경로, 책 설명(Info) 등 상세 정보 포함
-        sql = "SELECT Title, Author, Publisher, Info, Image_path, Isbn FROM Book_Info WHERE Tracking_num = :1"
+        sql = "SELECT Title, Author, Publisher, Price, Link, Info, Image_path, Isbn FROM Book_Info WHERE Tracking_num = :1"
         cur.execute(sql, (tracking_num,))
         row = cur.fetchone()
         cur.close()
         return row
+
+    def update_book(self, data, tracking_num):
+        """도서 정보를 업데이트합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            UPDATE Book_Info
+            SET Title = :1, Author = :2, Publisher = :3, Price = :4,
+                Link = :5, Info = :6, Image_path = :7, Isbn = :8
+            WHERE Tracking_num = :9
+        """
+        cur.execute(sql, data + (tracking_num,))
+        conn.commit()
+        cur.close()
 
     def fetch_users_by_book_loan(self, tracking_num):
         """특정 도서를 대출 중인 회원 목록을 가져옵니다."""
@@ -96,7 +110,28 @@ class OracleDB:
         cur.close()
         return rows   
 
+    def fetch_books_by_isbn_with_status(self, isbn):
+        """ISBN으로 모든 동일 도서와 대출 상태를 조회합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            SELECT b.Title,
+                   CASE WHEN r.Tracking_num IS NOT NULL THEN '대출중' ELSE '대출가능' END,
+                   b.Tracking_num
+            FROM Book_Info b
+            LEFT JOIN (SELECT Tracking_num FROM Rent_Management WHERE Return_date IS NULL) r
+            ON b.Tracking_num = r.Tracking_num
+            WHERE b.Isbn = :isbn AND b.Del_date IS NULL
+            ORDER BY b.Tracking_num
+        """
+        cur.execute(sql, isbn=isbn)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+
 #----------------------------------------------------------------------------------------------------------- 
+
+
 
     def search_users_for_loan(self, keyword):
         """키워드로 회원 이름 또는 회원번호를 검색합니다."""
@@ -115,6 +150,40 @@ class OracleDB:
         rows = cur.fetchall()
         cur.close()
         return rows
+
+        #도서 정보 대출 정보에 도서 대여할 회원 
+    def check_overdue_status(self, user_id):
+        """회원의 연체 도서 여부를 확인합니다. 연체 시 True를 반환합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            SELECT COUNT(*)
+            FROM Rent_Management
+            WHERE id_num = :user_id
+            AND Return_date IS NULL
+            AND End_date < SYSDATE
+        """
+        cur.execute(sql, user_id=user_id)
+        overdue_count = cur.fetchone()[0]
+        cur.close()
+        return overdue_count > 0
+
+    def process_loan(self, tracking_num, user_id):
+        """도서를 대출하고, 반납 예정일을 반환합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        # 반납 예정일을 저장할 변수
+        end_date_var = cur.var(oracledb.DB_TYPE_DATE)
+        sql = """
+            INSERT INTO Rent_Management (Tracking_num, id_num, Start_date, End_date)
+            VALUES (:tracking_num, :user_id, SYSDATE, SYSDATE + 14)
+            RETURNING End_date INTO :end_date
+        """
+        cur.execute(sql, tracking_num=tracking_num, user_id=user_id, end_date=end_date_var)
+        conn.commit()
+        end_date = end_date_var.getvalue()[0] # getvalue()는 리스트를 반환하므로 첫 번째 요소를 가져옴
+        cur.close()
+        return end_date
 
 # -----------------------------
 # 메인 GUI
@@ -225,14 +294,14 @@ class BookManagerApp:
             if column == '#6':
                 item_id = self.book_tree.identify_row(event.y)
                 item_values = self.book_tree.item(item_id, 'values')
-                tracking_num = item_values[0]  # 관리번호는 첫 번째 값 (인덱스 0)
-                self.open_book_detail_window(tracking_num)
+                book_isbn = item_values[4] # ISBN은 5번째 값 (인덱스 4)
+                self.open_book_lookup_window(book_isbn)
 
-    def open_book_detail_window(self, tracking_num):
-        """도서 상세 정보 창을 엽니다."""
-        detail_window = tk.Toplevel(self.root)
-        BookLoanWindow(detail_window, self.db, tracking_num)
-        self.root.wait_window(detail_window)
+    def open_book_lookup_window(self, book_isbn):
+        """동일 ISBN 도서 조회 창을 엽니다."""
+        lookup_window = tk.Toplevel(self.root)
+        BookLookupWindow(lookup_window, self.db, book_isbn)
+        self.root.wait_window(lookup_window)
         self.load_book_data() # 상세 정보 창이 닫히면 목록을 새로고침합니다.
 
     def on_book_tree_motion(self, event):
