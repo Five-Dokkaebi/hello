@@ -5,6 +5,8 @@ from tkinter.font import Font
 
 # user_registration.py에 정의된 클래스를 import
 from user_registration import MemberRegistrationWindow
+# 새로 만들 user_Edit_delete_Management.py 파일에서 클래스를 가져옵니다.
+from user_Edit_Delete_Management import UserDetailWindow
 import oracledb
 
 # -----------------------------
@@ -32,7 +34,7 @@ class OracleDB:
         conn = self.connect()
         cur = conn.cursor()
         # 생년월일 컬럼을 'YYYY-MM-DD' 형식의 문자열로 변환하여 선택합니다.
-        sql = "SELECT name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email FROM user_reg ORDER BY name"
+        sql = "SELECT id_num, name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email FROM user_reg WHERE Del_date IS NULL ORDER BY name"
         cur.execute(sql)
         rows = cur.fetchall()
         cur.close()
@@ -45,16 +47,27 @@ class OracleDB:
         # '%'를 사용하여 부분 일치 검색을 수행합니다.
         search_term = f'%{keyword}%'
         sql = """
-            SELECT name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email 
+            SELECT id_num, name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email 
             FROM user_reg 
-            WHERE name LIKE :1 OR tel_num LIKE :2
+            WHERE (name LIKE :1 OR tel_num LIKE :2) AND Del_date IS NULL
             ORDER BY name
         """
         # :1과 :2에 각각 동일한 값을 바인딩합니다.
         cur.execute(sql, (search_term, search_term))
         rows = cur.fetchall()
         cur.close()
-        return rows        
+        return rows
+
+    def fetch_user_by_id(self, user_id):
+        """ID로 특정 회원 정보를 가져옵니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        # 이미지 경로를 포함한 모든 컬럼을 가져옵니다.
+        sql = "SELECT name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email, image_path FROM user_reg WHERE id_num = :1"
+        cur.execute(sql, (user_id,))
+        row = cur.fetchone() # 단일 행을 가져옵니다.
+        cur.close()
+        return row          
 
     def insert_user_reg(self, data):
         conn = self.connect()
@@ -68,6 +81,99 @@ class OracleDB:
         cur.close()
 
 
+    def update_user(self, data, user_id):
+        """회원 정보를 업데이트합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            UPDATE user_reg
+            SET name = :1,
+                birthday = TO_DATE(:2, 'YYYY-MM-DD'),
+                gender = :3,
+                tel_num = :4,
+                email = :5,
+                image_path = :6
+            WHERE id_num = :7
+        """
+        cur.execute(sql, data + (user_id,))
+        conn.commit()
+        cur.close()
+    
+#------------------------------------------------------------------------------------------------
+    def fetch_loans_by_user(self, user_id):#user_edit delete management.py 대출정보
+        """특정 회원의 대출 정보를 가져옵니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        # RENTAL 테이블과 BOOK_INFO 테이블을 조인하여 대출 정보를 가져옵니다.
+        # 테이블과 컬럼 이름은 실제 DB 스키마에 맞게 조정해야 합니다.
+        sql = """
+            SELECT b.Title, TO_CHAR(r.Start_date, 'YYYY-MM-DD'), b.Isbn
+            FROM Rent_Management r
+            JOIN Book_info b ON r.Tracking_num = b.Tracking_num
+            JOIN User_reg c ON r.id_num = c.id_num
+            WHERE r.id_num = :user_id
+            AND r.Return_date IS NULL
+            AND b.Del_date IS NULL
+            AND c.Del_date IS NULL
+            ORDER BY r.Start_date DESC
+        """
+        cur.execute(sql, user_id=user_id)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+#------------------------------------------------------------------------------------------------
+    def fetch_past_loans_by_user(self, user_id):#회원의 과거 내역
+        """특정 회원의 과거 대출 내역을 가져옵니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            SELECT b.Title, TO_CHAR(r.Start_date, 'YYYY-MM-DD'), TO_CHAR(r.Return_date, 'YYYY-MM-DD')
+            FROM Rent_Management r
+            JOIN Book_info b ON r.Tracking_num = b.Tracking_num
+            JOIN User_reg c ON r.id_num = c.id_num
+            WHERE r.id_num = :user_id
+            AND r.Return_date IS NOT NULL
+            AND c.Del_date IS NULL
+            ORDER BY r.Return_date DESC
+        """
+        cur.execute(sql, user_id=user_id)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+
+    def fetch_all_current_loans_for_user(self, user_id):
+        """특정 회원의 모든 대출중인 도서 정보를 반납을 위해 가져옵니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            SELECT b.Title, b.Isbn, TO_CHAR(r.Start_date, 'YYYY-MM-DD'), TO_CHAR(r.End_date, 'YYYY-MM-DD'),
+                   CASE WHEN SYSDATE > r.End_date THEN TRUNC(SYSDATE - r.End_date) ELSE 0 END as Overdue_Days,
+                   r.rent_num
+            FROM Rent_Management r
+            JOIN Book_info b ON r.Tracking_num = b.Tracking_num
+            WHERE r.id_num = :user_id
+            AND r.Return_date IS NULL
+            AND b.Del_date IS NULL
+            ORDER BY r.Start_date
+        """
+        cur.execute(sql, user_id=user_id)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+
+    def process_bulk_return(self, rent_nums):
+        """여러 도서를 한 번에 반납 처리합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        # executemany를 사용하기 위해 데이터를 (rent_num,) 형태의 튜플 리스트로 변환합니다.
+        data_to_update = [(num,) for num in rent_nums]
+        
+        sql = "UPDATE Rent_Management SET Return_date = SYSDATE WHERE rent_num = :1"
+        
+        # executemany는 여러 데이터 행에 대해 동일한 SQL 문을 실행합니다.
+        cur.executemany(sql, data_to_update)
+        conn.commit()
+        cur.close()
 
 # -----------------------------
 # 메인 GUI
@@ -112,13 +218,30 @@ class BookManagerApp:
         ttk.Button(tab_frame, text="회원등록", command=self.open_registration_window).pack(side=tk.RIGHT)
 
         # 회원 목록 테이블 (컬럼 예시)
-        columns = ("이름", "생년월일", "성별", "전화번호", "이메일")
+        columns = ("이름", "생년월일", "성별", "전화번호", "이메일","정보")
         self.user_tree = ttk.Treeview(self.root, columns=columns, show="headings")
         self.user_tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-        for col in columns:
+        # 각 컬럼의 너비를 설정하여 가로 스크롤이 생기지 않도록 합니다.
+        col_widths = {
+            "이름": 80,
+            "생년월일": 180,
+            "성별": 100,
+            "전화번호": 100,
+            "이메일": 120,
+            "정보": 100
+        }
+
+        for col, width in col_widths.items():
             self.user_tree.heading(col, text=col)
-            self.user_tree.column(col, width=150, anchor=tk.CENTER)
+            self.user_tree.column(col, width=width, anchor=tk.CENTER)
+
+
+        # Treeview에 마우스 클릭 이벤트를 연결합니다.
+        self.user_tree.bind("<Button-1>", self.on_tree_click)
+
+        # Treeview에 마우스 움직임 이벤트를 연결하여 커서 모양을 변경합니다.
+        self.user_tree.bind("<Motion>", self.on_tree_motion)
 
         # 프로그램 시작 시 회원 목록을 불러옵니다.
         self.load_user_data()
@@ -138,7 +261,11 @@ class BookManagerApp:
                 user_list = self.db.fetch_all_users()
 
             for user in user_list:
-                self.user_tree.insert('', tk.END, values=user)
+                user_id = user[0]
+                display_values = list(user[1:])
+                # '정보' 칸에 '정보 보기' 텍스트를 추가하고, 위에서 설정한 태그를 적용합니다.
+                values_with_button = display_values + ["정보"]
+                self.user_tree.insert('', tk.END, iid=user_id, values=values_with_button)
         except Exception as e:
             messagebox.showerror("DB 오류", f"회원 목록을 불러오는 데 실패했습니다: {e}")
 
@@ -155,7 +282,34 @@ class BookManagerApp:
         MemberRegistrationWindow(register_window, self.db)
         self.root.wait_window(register_window) # 등록 창이 닫힐 때까지 기다립니다.
         self.load_user_data() # 창이 닫히면 데이터를 새로고침합니다.
+        
 
+    def on_tree_click(self, event):
+        """Treeview 클릭 이벤트를 처리하여 '정보 보기' 버튼 클릭을 감지합니다."""
+        region = self.user_tree.identify("region", event.x, event.y)
+        if region == "cell":
+            column = self.user_tree.identify_column(event.x)
+            # 마지막 컬럼('#6')이 '정보' 컬럼입니다.
+            if column == '#6':
+                user_id = self.user_tree.identify_row(event.y)
+                if user_id:
+                    self.open_user_detail_window(user_id)
+
+    def open_user_detail_window(self, user_id):
+        """회원 상세 정보 창을 엽니다."""
+        detail_window = tk.Toplevel(self.root)
+        UserDetailWindow(detail_window, self.db, user_id)
+        self.root.wait_window(detail_window)
+        self.load_user_data() # 상세 정보 창이 닫히면 목록을 새로고침합니다.
+        
+    def on_tree_motion(self, event):
+        """마우스 움직임에 따라 '정보' 컬럼 위에서 커서를 변경합니다."""
+        column = self.user_tree.identify_column(event.x)
+        # 마지막 컬럼('#6') 위일 때만 커서를 손가락 모양으로 변경
+        if column == '#6':
+            self.user_tree.config(cursor="hand2")
+        else:
+            self.user_tree.config(cursor="")
 
 # -----------------------------
 # 실행부
