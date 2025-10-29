@@ -3,12 +3,16 @@ from tkinter import ttk, messagebox
 from tkinter.font import Font
 from PIL import Image, ImageTk
 
+from Update_book import BookUpdateWindow
+
+
 class BookLoanWindow:
     def __init__(self, master, db, tracking_num):
         self.master = master
         self.db = db
         self.tracking_num = tracking_num
         self.book_data = None
+        self.borrower_tel = None # 대출 중인 회원의 전화번호 저장
         self.photo_path = None
         self.preview_width = 150
         self.preview_height = 200
@@ -110,7 +114,7 @@ class BookLoanWindow:
         bottom_button_frame.pack(fill="x", side="bottom", pady=(10, 0))
         delete_btn = tk.Button(bottom_button_frame, text="삭제", bg="lightcoral", width=10)
         delete_btn.pack(side="right", padx=5, pady=5)
-        edit_btn = tk.Button(bottom_button_frame, text="수정", bg="lightblue", width=10)
+        edit_btn = tk.Button(bottom_button_frame, text="수정", bg="lightblue", width=10, command=self.open_book_update_window)
         edit_btn.pack(side="right", padx=5, pady=5)
 
 
@@ -151,8 +155,8 @@ class BookLoanWindow:
 
     def populate_book_data(self):
         """가져온 도서 데이터로 위젯을 채웁니다."""
-        # book_data 인덱스: 0:Title, 1:Author, 2:Publisher, 3:Info, 4:Image_path, 5:Isbn
-        title, author, publisher, info, image_path, isbn = self.book_data
+        # book_data 인덱스: 0:Title, 1:Author, 2:Publisher, 3:Price, 4:Link, 5:Info, 6:Image_path, 7:Isbn
+        title, author, publisher, price, link, info, image_path, isbn = self.book_data
 
         self.title_val_label.config(text=title)
         self.author_val_label.config(text=author)
@@ -193,7 +197,8 @@ class BookLoanWindow:
             if loan_list:
                 # 대출 중인 경우
                 self.loan_status_label.config(text="대출중", fg="red")
-                
+
+                self.borrower_tel = loan_list[0][1] if loan_list else None
                 # 검색 기능 비활성화
                 self.member_search_entry.delete(0, tk.END)
                 self.member_search_entry.insert(0, "현재 대출 중인 도서입니다.")
@@ -202,6 +207,7 @@ class BookLoanWindow:
             else:
                 # 대출 가능한 경우
                 self.loan_status_label.config(text="대출가능", fg="green")
+                self.borrower_tel = None
                 # 검색 기능 활성화
                 self.member_search_entry.config(state=tk.NORMAL)
                 self.member_search_entry.delete(0, tk.END)
@@ -235,12 +241,44 @@ class BookLoanWindow:
             messagebox.showerror("DB 오류", f"회원 검색 중 오류가 발생했습니다: {e}", parent=self.master)
 
     def on_member_tree_click(self, event):
-        """회원 검색 결과 테이블 클릭 이벤트를 처리합니다. (현재 기능 없음)"""
+        """회원 검색 결과 테이블 클릭 이벤트를 처리하여 대출을 진행합니다."""
+        # '대출가능' 상태가 아니면 아무 동작도 하지 않음
+        if self.loan_status_label.cget("text") != "대출가능":
+            return
         region = self.member_tree.identify("region", event.x, event.y)
-        if region == "cell" and self.member_tree.identify_column(event.x) == '#4':
+        if region == "cell" and self.member_tree.identify_column(event.x) == '#4': # '선택' 컬럼
             item_id = self.member_tree.identify_row(event.y)
-            user_id = self.member_tree.item(item_id, 'values')[0]
-            messagebox.showinfo("알림", f"회원번호 {user_id} 선택됨 (대출 기능 구현 필요)", parent=self.master)
+            values = self.member_tree.item(item_id, 'values')
+            user_id = values[0]
+            user_name = values[1]
+
+            # 1. 대출 확인 알림창 표시
+            confirm = messagebox.askyesno(
+                "대출 확인",
+                f"'{user_name}' 회원님으로 대여하시겠습니까?",
+                parent=self.master
+            )
+
+            if confirm:
+                try:
+                    # 2. 회원의 연체 여부 확인
+                    is_overdue = self.db.check_overdue_status(user_id)
+                    if is_overdue:
+                        messagebox.showerror("대출 불가", "이 회원은 연체된 책이 있으므로 대여할 수 없습니다.", parent=self.master)
+                        return
+
+                    # 3. 대출 처리
+                    end_date = self.db.process_loan(self.tracking_num, user_id)
+                    
+                    # 4. 성공 메시지 표시
+                    end_date_str = end_date.strftime('%Y.%m.%d %H:%M:%S')
+                    messagebox.showinfo("대출 완료", f"대여되었습니다.\n반납기간: {end_date_str}", parent=self.master)
+
+                    # 5. 대출 완료 후 창 닫기
+                    self.master.destroy()
+
+                except Exception as e:
+                    messagebox.showerror("DB 오류", f"대출 처리 중 오류가 발생했습니다: {e}", parent=self.master)
 
     def on_member_tree_motion(self, event):
         """마우스 움직임에 따라 '선택' 컬럼 위에서 커서를 변경합니다."""
@@ -248,7 +286,27 @@ class BookLoanWindow:
         if column == '#4':
             self.member_tree.config(cursor="hand2")
         else:
-            self.member_tree.config(cursor="")        
+            self.member_tree.config(cursor="")
+
+    def open_book_update_window(self):
+        """도서 정보 수정 창을 엽니다."""
+        if not self.book_data:
+            messagebox.showerror("오류", "수정할 도서 정보가 없습니다.", parent=self.master)
+            return
+
+        try:
+            update_window = tk.Toplevel(self.master)
+            # 수정 창에 DB 객체, 현재 도서 데이터, 관리번호를 전달합니다.
+            BookUpdateWindow(update_window, self.db, self.book_data, self.tracking_num)
+            self.master.wait_window(update_window)
+
+            # 수정 창이 닫힌 후, 변경된 정보를 다시 불러와 화면을 갱신합니다.
+            self.fetch_book_details()
+            if self.book_data:
+                self.populate_book_data()
+                self.populate_loan_data() # 대출 정보도 새로고침
+        except Exception as e:
+            messagebox.showerror("DB 오류", f"도서 정보 수정 창을 여는 중 오류가 발생했습니다: {e}", parent=self.master)
 
 
 
@@ -262,8 +320,8 @@ if __name__ == '__main__':
     class MockDB:
         def fetch_book_by_tracking_num(self, tracking_num):
             return ("테스트 도서", "테스트 저자", "테스트 출판사", "이것은 테스트용 도서 설명입니다.", None, "1234567890")
-        def fetch_users_by_book_loan(self, tracking_num):
-            return [("홍길동", "010-1111-2222", "2023-10-01", "2023-10-15")]
+        def fetch_user_by_tel(self, tel_num):
+            return ("홍길동", "1990-01-01", "남", "010-1111-2222", "hong@example.com", None)
 
     db_mock = MockDB()
     test_tracking_num = 1
