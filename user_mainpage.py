@@ -34,7 +34,7 @@ class OracleDB:
         conn = self.connect()
         cur = conn.cursor()
         # 생년월일 컬럼을 'YYYY-MM-DD' 형식의 문자열로 변환하여 선택합니다.
-        sql = "SELECT id_num, name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email FROM user_reg WHERE Del_date IS NULL ORDER BY name"
+        sql = "SELECT id_num, name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email, Del_date FROM user_reg ORDER BY name"
         cur.execute(sql)
         rows = cur.fetchall()
         cur.close()
@@ -47,9 +47,9 @@ class OracleDB:
         # '%'를 사용하여 부분 일치 검색을 수행합니다.
         search_term = f'%{keyword}%'
         sql = """
-            SELECT id_num, name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email 
+            SELECT id_num, name, TO_CHAR(birthday, 'YYYY-MM-DD'), gender, tel_num, email, Del_date
             FROM user_reg 
-            WHERE (name LIKE :1 OR tel_num LIKE :2) AND Del_date IS NULL
+            WHERE (name LIKE :1 OR tel_num LIKE :2)
             ORDER BY name
         """
         # :1과 :2에 각각 동일한 값을 바인딩합니다.
@@ -99,6 +99,28 @@ class OracleDB:
         conn.commit()
         cur.close()
     
+    def has_active_loans(self, user_id):
+        """회원의 미반납 도서 여부를 확인합니다. 미반납 도서가 있으면 True를 반환합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            SELECT COUNT(*) FROM Rent_Management
+            WHERE id_num = :user_id AND Return_date IS NULL
+        """
+        cur.execute(sql, user_id=user_id)
+        loan_count = cur.fetchone()[0]
+        cur.close()
+        return loan_count > 0
+
+    def soft_delete_user(self, user_id):
+        """회원 정보를 논리적으로 삭제합니다 (Del_date 업데이트)."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = "UPDATE User_reg SET Del_date = SYSDATE WHERE id_num = :user_id"
+        cur.execute(sql, user_id=user_id)
+        conn.commit()
+        cur.close()
+
 #------------------------------------------------------------------------------------------------
     def fetch_loans_by_user(self, user_id):#user_edit delete management.py 대출정보
         """특정 회원의 대출 정보를 가져옵니다."""
@@ -236,6 +258,8 @@ class BookManagerApp:
             self.user_tree.heading(col, text=col)
             self.user_tree.column(col, width=width, anchor=tk.CENTER)
 
+        # 탈퇴한 회원을 위한 스타일 태그를 설정합니다.
+        self.user_tree.tag_configure('deleted_user', foreground='gray')
 
         # Treeview에 마우스 클릭 이벤트를 연결합니다.
         self.user_tree.bind("<Button-1>", self.on_tree_click)
@@ -261,11 +285,15 @@ class BookManagerApp:
                 user_list = self.db.fetch_all_users()
 
             for user in user_list:
-                user_id = user[0]
-                display_values = list(user[1:])
+                user_id = user[0] # id_num
+                del_date = user[6] # Del_date
+                display_values = list(user[1:6]) # name, birthday, gender, tel_num, email
                 # '정보' 칸에 '정보 보기' 텍스트를 추가하고, 위에서 설정한 태그를 적용합니다.
                 values_with_button = display_values + ["정보"]
-                self.user_tree.insert('', tk.END, iid=user_id, values=values_with_button)
+                if del_date is not None: # 탈퇴한 회원이면
+                    self.user_tree.insert('', tk.END, iid=user_id, values=values_with_button, tags=('deleted_user',))
+                else: # 활성 회원이면
+                    self.user_tree.insert('', tk.END, iid=user_id, values=values_with_button)
         except Exception as e:
             messagebox.showerror("DB 오류", f"회원 목록을 불러오는 데 실패했습니다: {e}")
 
@@ -292,7 +320,12 @@ class BookManagerApp:
             # 마지막 컬럼('#6')이 '정보' 컬럼입니다.
             if column == '#6':
                 user_id = self.user_tree.identify_row(event.y)
-                if user_id:
+                if user_id: # 클릭된 행이 있는지 확인
+                    # 클릭된 행의 태그를 가져옵니다.
+                    tags = self.user_tree.item(user_id, 'tags')
+                    # 'deleted_user' 태그가 있으면 아무 동작도 하지 않습니다.
+                    if 'deleted_user' in tags:
+                        return
                     self.open_user_detail_window(user_id)
 
     def open_user_detail_window(self, user_id):
@@ -307,7 +340,14 @@ class BookManagerApp:
         column = self.user_tree.identify_column(event.x)
         # 마지막 컬럼('#6') 위일 때만 커서를 손가락 모양으로 변경
         if column == '#6':
-            self.user_tree.config(cursor="hand2")
+            user_id = self.user_tree.identify_row(event.y)
+            if user_id:
+                tags = self.user_tree.item(user_id, 'tags')
+                # 탈퇴한 회원이 아닐 때만 커서를 변경합니다.
+                if 'deleted_user' not in tags:
+                    self.user_tree.config(cursor="hand2")
+                else:
+                    self.user_tree.config(cursor="")
         else:
             self.user_tree.config(cursor="")
 
