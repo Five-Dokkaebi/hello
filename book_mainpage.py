@@ -246,7 +246,7 @@ class BookManagerApp:
         tab_frame = ttk.Frame(self.root, padding=(10, 0, 10, 5))
         tab_frame.pack(fill=tk.X)
         ttk.Button(tab_frame, text="도서관리", style="Gray.TButton").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(tab_frame, text="회원관리").pack(side=tk.LEFT)
+        ttk.Button(tab_frame, text="회원관리", command=self.switch_to_user_management).pack(side=tk.LEFT)
         ttk.Button(tab_frame, text="도서등록", command=self.open_book_registration_window).pack(side=tk.RIGHT)
 
         # 도서 목록 테이블
@@ -359,6 +359,18 @@ class BookManagerApp:
                     self.book_tree.config(cursor="")
         else:
             self.book_tree.config(cursor="")
+
+    def switch_to_user_management(self):
+        """회원 관리 창으로 전환합니다."""
+        self.root.destroy() # 현재 창을 닫습니다.
+
+        # 순환 참조 오류를 피하기 위해 함수 내에서 import 합니다.
+        import user_mainpage
+
+        # 새로운 tkinter 루트 창과 앱을 생성하여 실행합니다.
+        new_root = tk.Tk()
+        user_mainpage.BookManagerApp(new_root)
+        new_root.mainloop()
 
 # -----------------------------
 # 실행부
