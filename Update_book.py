@@ -99,6 +99,17 @@ class BookUpdateWindow:
             self.show_image(path)
 
     def confirm_update(self):
+        # 1. 대출 상태 확인
+        try:
+            is_on_loan = self.db.is_book_on_loan(self.tracking_num)
+            if is_on_loan:
+                messagebox.showwarning("수정 불가", "대여중이므로 수정할 수 없습니다.", parent=self.master)
+                return
+        except Exception as e:
+            messagebox.showerror("DB 오류", f"대출 상태 확인 중 오류가 발생했습니다: {e}", parent=self.master)
+            return
+
+        # 2. 입력 값 가져오기
         title = self.entries["제목"].get().strip()
         author = self.entries["저자"].get().strip()
         publisher = self.entries["출판사"].get().strip()
@@ -108,8 +119,9 @@ class BookUpdateWindow:
         info = self.desc_text.get("1.0", tk.END).strip()
         image_path = self.photo_path
 
-        if not all([title, author, publisher, isbn]):
-            messagebox.showwarning("입력 오류", "제목, 저자, 출판사, ISBN은 필수 항목입니다.", parent=self.master)
+        # 3. 필수 정보 입력 여부 확인
+        if not all([title, author, publisher, isbn, info]):
+            messagebox.showwarning("입력 오류", "모든 정보를 입력하지 않았습니다.", parent=self.master)
             return
         
         try:
@@ -121,6 +133,7 @@ class BookUpdateWindow:
         data_to_update = (title, author, publisher, price, link, info, image_path, isbn)
 
         try:
+            # 4. 데이터베이스 업데이트
             self.db.update_book(data_to_update, self.tracking_num)
             messagebox.showinfo("성공", "도서 정보가 성공적으로 수정되었습니다.", parent=self.master)
             self.master.destroy()
