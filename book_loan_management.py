@@ -112,7 +112,7 @@ class BookLoanWindow:
         # 하단 버튼 (수정, 삭제)
         bottom_button_frame = tk.Frame(left_container)
         bottom_button_frame.pack(fill="x", side="bottom", pady=(10, 0))
-        delete_btn = tk.Button(bottom_button_frame, text="삭제", bg="lightcoral", width=10)
+        delete_btn = tk.Button(bottom_button_frame, text="삭제", bg="lightcoral", width=10, command=self.confirm_delete_book)
         delete_btn.pack(side="right", padx=5, pady=5)
         edit_btn = tk.Button(bottom_button_frame, text="수정", bg="lightblue", width=10, command=self.open_book_update_window)
         edit_btn.pack(side="right", padx=5, pady=5)
@@ -145,9 +145,11 @@ class BookLoanWindow:
         self.member_tree = ttk.Treeview(right_container, columns=columns, show="headings")
         self.member_tree.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        for col in columns:
+        # 각 컬럼의 너비를 직접 지정하여 스크롤바가 생기지 않도록 합니다.
+        col_widths = {"회원번호": 100, "회원명": 150, "상태": 80, "선택": 80}
+        for col, width in col_widths.items():
             self.member_tree.heading(col, text=col)
-            self.member_tree.column(col, anchor=tk.CENTER)
+            self.member_tree.column(col, width=width, anchor=tk.CENTER)
 
         # '선택' 버튼 기능 연결
         self.member_tree.bind("<Button-1>", self.on_member_tree_click)
@@ -307,6 +309,31 @@ class BookLoanWindow:
                 self.populate_loan_data() # 대출 정보도 새로고침
         except Exception as e:
             messagebox.showerror("DB 오류", f"도서 정보 수정 창을 여는 중 오류가 발생했습니다: {e}", parent=self.master)
+
+    def confirm_delete_book(self):
+        """도서 삭제를 확인하고 처리합니다."""
+        try:
+            # 1. 대출 중인지 확인
+            is_on_loan = self.db.is_book_on_loan(self.tracking_num)
+            if is_on_loan:
+                messagebox.showwarning("삭제 불가", "대여중이므로 삭제할 수 없습니다.", parent=self.master)
+                return
+
+            # 2. 사용자에게 재확인
+            book_title = self.title_val_label.cget("text")
+            confirm = messagebox.askyesno(
+                "도서 삭제 확인",
+                f"'{book_title}' 도서를 정말로 삭제 처리하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+                parent=self.master
+            )
+
+            if confirm:
+                # 3. 논리적 삭제 실행
+                self.db.soft_delete_book(self.tracking_num)
+                messagebox.showinfo("성공", "도서 삭제 처리가 완료되었습니다.", parent=self.master)
+                self.master.destroy()
+        except Exception as e:
+            messagebox.showerror("DB 오류", f"도서 삭제 처리 중 오류가 발생했습니다: {e}", parent=self.master)
 
 
 
