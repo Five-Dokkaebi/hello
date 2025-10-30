@@ -90,7 +90,7 @@ class UserDetailWindow:
         # 하단 버튼 (수정, 삭제)
         bottom_frame = tk.Frame(left_container)
         bottom_frame.pack(fill="x", side="bottom", pady=(10, 0))
-        delete_btn = tk.Button(bottom_frame, text="삭제", bg="lightcoral", width=10)        
+        delete_btn = tk.Button(bottom_frame, text="삭제", bg="lightcoral", width=10, command=self.confirm_delete_user)     
         delete_btn.pack(side="right", padx=5, pady=5)
         
         edit_btn = tk.Button(bottom_frame, text="수정", bg="lightblue", width=10, command=self.open_user_update_window)
@@ -251,7 +251,31 @@ class UserDetailWindow:
                 self.populate_data()
                 self.populate_loan_data() # 대출 정보도 새로고침
         except Exception as e:
-            messagebox.showerror("DB 오류", f"회원 정보 수정 창을 여는 중 오류가 발생했습니다: {e}", parent=self.master)           
+            messagebox.showerror("DB 오류", f"회원 정보 수정 창을 여는 중 오류가 발생했습니다: {e}", parent=self.master)
+
+    def confirm_delete_user(self):
+        """회원 탈퇴를 확인하고 처리합니다."""
+        try:
+            # 1. 반납하지 않은 도서가 있는지 확인
+            has_loans = self.db.has_active_loans(self.user_id)
+            if has_loans:
+                messagebox.showwarning("탈퇴 불가", "도서 대출 상태로 탈퇴할 수 없습니다.", parent=self.master)
+                return
+
+            # 2. 사용자에게 재확인
+            user_name = self.info_labels["이름"].cget("text")
+            confirm = messagebox.askyesno(
+                "회원 탈퇴 확인",
+                f"'{user_name}' 회원을 정말로 탈퇴 처리하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+                parent=self.master
+            )
+
+            if confirm:
+                self.db.soft_delete_user(self.user_id)
+                messagebox.showinfo("성공", "회원 탈퇴 처리가 완료되었습니다.", parent=self.master)
+                self.master.destroy()
+        except Exception as e:
+            messagebox.showerror("DB 오류", f"회원 탈퇴 처리 중 오류가 발생했습니다: {e}", parent=self.master)        
 
 #-----------------------------------------------------------------------------------
 
