@@ -1,0 +1,43 @@
+# .github/workflows/build-windows.yml
+
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Download and extract Oracle Instant Client for Windows
+        run: |
+          Invoke-WebRequest -Uri https://download.oracle.com/otn_software/win/instantclient/1918000/instantclient-basiclite-windows.x64-19.18.0.0.0dbru.zip -OutFile instantclient.zip
+          Expand-Archive -Path instantclient.zip -DestinationPath .
+          echo "$PWD/instantclient_19_18" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller --name "도서회원관리" --onefile --windowed book_mainpage.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: 도서회원관리-windows
+          path: dist/도서회원관리.exe
