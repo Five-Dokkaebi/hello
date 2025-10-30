@@ -96,6 +96,17 @@ class UserUpdateWindow:
             self.show_image(path)
 
     def confirm_update(self):
+        # 1. 대출 상태 확인
+        try:
+            has_loans = self.db.has_active_loans(self.user_id)
+            if has_loans:
+                messagebox.showwarning("수정 불가", "도서 대출 상태로 수정할 수 없습니다.", parent=self.master)
+                return
+        except Exception as e:
+            messagebox.showerror("DB 오류", f"대출 상태 확인 중 오류가 발생했습니다: {e}", parent=self.master)
+            return
+
+        # 2. 입력 값 가져오기
         name = self.entries["이름"].get().strip()
         birthday = self.entries["생년월일 (YYYY-MM-DD)"].get().strip()
         gender = self.entries["성별"].get().strip()
@@ -103,13 +114,15 @@ class UserUpdateWindow:
         email = self.entries["이메일"].get().strip()
         image_path = self.photo_path
 
-        if not all([name, birthday, gender, tel_num]):
-            messagebox.showwarning("입력 오류", "이름, 생년월일, 성별, 전화번호는 필수 항목입니다.", parent=self.master)
+        # 3. 모든 정보 입력 여부 확인 (이메일 포함)
+        if not all([name, birthday, gender, tel_num, email]):
+            messagebox.showwarning("입력 오류", "모든 정보를 입력하지 않았습니다.", parent=self.master)
             return
 
         data_to_update = (name, birthday, gender, tel_num, email, image_path)
 
         try:
+            # 4. 데이터베이스 업데이트
             self.db.update_user(data_to_update, self.user_id)
             messagebox.showinfo("성공", "회원 정보가 성공적으로 수정되었습니다.", parent=self.master)
             self.master.destroy()
