@@ -93,6 +93,28 @@ class OracleDB:
         conn.commit()
         cur.close()
 
+    def is_book_on_loan(self, tracking_num):
+        """특정 도서가 대출 중인지 확인합니다. 대출 중이면 True를 반환합니다."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = """
+            SELECT COUNT(*) FROM Rent_Management
+            WHERE Tracking_num = :tracking_num AND Return_date IS NULL
+        """
+        cur.execute(sql, tracking_num=tracking_num)
+        loan_count = cur.fetchone()[0]
+        cur.close()
+        return loan_count > 0
+
+    def soft_delete_book(self, tracking_num):
+        """도서 정보를 논리적으로 삭제합니다 (Del_date 업데이트)."""
+        conn = self.connect()
+        cur = conn.cursor()
+        sql = "UPDATE Book_Info SET Del_date = SYSDATE WHERE Tracking_num = :tracking_num"
+        cur.execute(sql, tracking_num=tracking_num)
+        conn.commit()
+        cur.close()
+
     def fetch_users_by_book_loan(self, tracking_num):
         """특정 도서를 대출 중인 회원 목록을 가져옵니다."""
         conn = self.connect()
