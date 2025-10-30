@@ -31,7 +31,7 @@ class OracleDB:
         """데이터베이스에서 모든 도서 정보를 가져옵니다."""
         conn = self.connect()
         cur = conn.cursor()
-        sql = "SELECT Tracking_num, Title, Author, Publisher, Isbn FROM Book_Info ORDER BY Title"
+        sql = "SELECT Tracking_num, Title, Author, Publisher, Isbn, Del_date FROM Book_Info ORDER BY Title"
         cur.execute(sql)
         rows = cur.fetchall()
         cur.close()
@@ -44,7 +44,7 @@ class OracleDB:
         search_term = f'%{keyword}%'
         # :1, :2 대신 :keyword 라는 '이름'을 가진 바인드 변수를 사용합니다.
         sql = """
-            SELECT Tracking_num, Title, Author, Publisher, Isbn
+            SELECT Tracking_num, Title, Author, Publisher, Isbn, Del_date
             FROM Book_Info 
             WHERE Title LIKE :keyword OR Author LIKE :keyword
             ORDER BY Title
@@ -268,6 +268,9 @@ class BookManagerApp:
             self.book_tree.heading(col, text=col)
             self.book_tree.column(col, width=width, anchor=tk.CENTER)
 
+        # 삭제된 도서를 위한 스타일 태그를 설정합니다.
+        self.book_tree.tag_configure('deleted_book', foreground='gray')
+
         # Treeview에 마우스 클릭 및 움직임 이벤트를 연결합니다.
         self.book_tree.bind("<Button-1>", self.on_book_tree_click)
         self.book_tree.bind("<Motion>", self.on_book_tree_motion)
@@ -289,8 +292,15 @@ class BookManagerApp:
                 book_list = self.db.fetch_all_books()
 
             for book in book_list:
-                values_with_button = list(book) + ["정보"]
-                self.book_tree.insert('', tk.END, values=values_with_button)
+                tracking_num = book[0]
+                del_date = book[5] # Del_date는 6번째 컬럼 (인덱스 5)
+                display_values = list(book[:5]) # 화면에 표시할 5개 컬럼
+                
+                values_with_button = display_values + ["정보"]
+                if del_date is not None: # 삭제된 도서이면
+                    self.book_tree.insert('', tk.END, iid=tracking_num, values=values_with_button, tags=('deleted_book',))
+                else: # 활성 도서이면
+                    self.book_tree.insert('', tk.END, iid=tracking_num, values=values_with_button)
         except Exception as e:
             messagebox.showerror("DB 오류", f"도서 목록을 불러오는 데 실패했습니다: {e}")
 
@@ -314,23 +324,39 @@ class BookManagerApp:
             column = self.book_tree.identify_column(event.x)
             # 마지막 컬럼('#6')이 '정보' 컬럼입니다.
             if column == '#6':
-                item_id = self.book_tree.identify_row(event.y)
-                item_values = self.book_tree.item(item_id, 'values')
-                book_isbn = item_values[4] # ISBN은 5번째 값 (인덱스 4)
-                self.open_book_lookup_window(book_isbn)
+                tracking_num = self.book_tree.identify_row(event.y)
+                if tracking_num: # 클릭된 행이 있는지 확인
+                    # 클릭된 행의 태그를 가져옵니다.
+                    tags = self.book_tree.item(tracking_num, 'tags')
+                    # 'deleted_book' 태그가 있으면 아무 동작도 하지 않습니다.
+                    if 'deleted_book' in tags:
+                        return
+                    item_values = self.book_tree.item(tracking_num, 'values')
+                    book_isbn = item_values[4] # ISBN은 5번째 값 (인덱스 4)
+                    self.open_book_lookup_window(book_isbn)
 
     def open_book_lookup_window(self, book_isbn):
         """동일 ISBN 도서 조회 창을 엽니다."""
         lookup_window = tk.Toplevel(self.root)
         BookLookupWindow(lookup_window, self.db, book_isbn)
-        self.root.wait_window(lookup_window)
+        # lookup_window가 초기화 과정에서 (예: 해당 도서 없음) 닫혔을 수 있으므로,
+        # 창이 여전히 존재하는지 확인한 후에만 wait_window를 호출합니다.
+        if lookup_window.winfo_exists():
+            self.root.wait_window(lookup_window)
         self.load_book_data() # 상세 정보 창이 닫히면 목록을 새로고침합니다.
 
     def on_book_tree_motion(self, event):
         """마우스 움직임에 따라 '정보' 컬럼 위에서 커서를 변경합니다."""
         column = self.book_tree.identify_column(event.x)
         if column == '#6':
-            self.book_tree.config(cursor="hand2")
+            tracking_num = self.book_tree.identify_row(event.y)
+            if tracking_num:
+                tags = self.book_tree.item(tracking_num, 'tags')
+                # 삭제된 도서가 아닐 때만 커서를 변경합니다.
+                if 'deleted_book' not in tags:
+                    self.book_tree.config(cursor="hand2")
+                else:
+                    self.book_tree.config(cursor="")
         else:
             self.book_tree.config(cursor="")
 
